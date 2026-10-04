@@ -1,0 +1,176 @@
+services:
+
+  traefik:
+    image: traefik:v2.11
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+    depends_on:
+      frontend:
+        condition: service_started
+      order-service:
+        condition: service_started
+      postgres-init:
+        condition: service_started
+      redis:
+        condition: service_started
+      product-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+    networks:
+      - web
+
+
+  postgres-init:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+       - postgres_data:/var/lib/postgresql/data
+       - ./postgres-init:/docker-entrypoint-initdb.d
+    networks:
+      - web
+      - postgres_data
+
+
+
+
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - redis_data:/data
+    networks:
+      - web
+      - redis_data
+    restart: always
+
+
+
+
+  frontend:
+    build: ./frontend
+    env_file:
+      - .env
+
+    depends_on:
+      - postgres-init
+        
+    deploy:
+      replicas: 2
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`) && !PathPrefix(`/api`)"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      
+    networks:
+      - web
+
+
+
+
+  order-service:
+    build: ./order-service
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres-init
+      DB_USER: ${POSTGRES_USER}
+      DB_PASS: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-init:5432/orders_db"
+    depends_on:
+      - postgres-init
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.order.rule=PathPrefix(`/api/orders`)"
+      - "traefik.http.middlewares.order-stripprefix.stripprefix.prefixes=/api/orders"
+      - "traefik.http.routers.order.middlewares=order-stripprefix"
+      - "traefik.http.routers.order.priority=300"
+      - "traefik.http.services.order.loadbalancer.server.port=5002"
+    networks:
+      - web
+      - postgres_data
+      - redis_data
+
+
+
+  product-service:
+    build: ./product-service
+    environment:
+      DB_HOST: postgres-init
+      DB_USER: ${POSTGRES_USER}
+      DB_PASS: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-init:5432/products_db"
+    depends_on:
+      - postgres-init
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.product.rule=PathPrefix(`/api/products`)"
+      - "traefik.http.middlewares.product-stripprefix.stripprefix.prefixes=/api/products"
+      - "traefik.http.routers.product.middlewares=product-stripprefix"
+      - "traefik.http.routers.product.priority=200"
+      - "traefik.http.services.product.loadbalancer.server.port=5001"
+    networks:
+      - web
+      - postgres_data
+
+
+
+  user-service:
+    build: ./user-service
+    environment:
+      DB_HOST: postgres-init
+      DB_USER: ${POSTGRES_USER}
+      DB_PASS: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-init:5432/users_db"
+    depends_on:
+      - postgres-init
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.user.rule=PathPrefix(`/api/users`)"
+      - "traefik.http.middlewares.user-stripprefix.stripprefix.prefixes=/api/users"
+      - "traefik.http.routers.user.middlewares=user-stripprefix"
+      - "traefik.http.routers.user.priority=100"
+      - "traefik.http.services.user.loadbalancer.server.port=5000"
+    networks:
+      - web
+      - postgres_data
+
+
+volumes:
+  postgres_data:
+  redis_data:
+
+
+networks:
+  web:
+    name: web
+    driver: bridge
+  postgres_data:
+    name: postgres_data
+    driver: bridge
+    internal: true
+  redis_data:
+    name: redis_data
+    driver: bridge
+    internal: true
+
+
+

@@ -1,0 +1,17 @@
+api:
+  insecure: true
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    watch: true
+    exposedByDefault: false
+
+entryPoints:
+  web:
+    address: ":80"
+  web_secure:
+    address: ":443"
+
+log:
+  level: INFO
