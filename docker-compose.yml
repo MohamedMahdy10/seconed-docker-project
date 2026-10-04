@@ -8,19 +8,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
-    depends_on:
-      frontend:
-        condition: service_started
-      order-service:
-        condition: service_started
-      postgres-init:
-        condition: service_started
-      redis:
-        condition: service_started
-      product-service:
-        condition: service_started
-      user-service:
-        condition: service_started
     networks:
       - web
 
@@ -32,12 +19,16 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       PGDATA: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     volumes:
        - postgres_data:/var/lib/postgresql/data
        - ./postgres-init:/docker-entrypoint-initdb.d
     networks:
-      - web
-      - postgres_data
+      - backend
 
 
 
@@ -54,8 +45,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - web
-      - redis_data
+      - backend
     restart: always
 
 
@@ -65,10 +55,6 @@ services:
     build: ./frontend
     env_file:
       - .env
-
-    depends_on:
-      - postgres-init
-        
     deploy:
       replicas: 2
     labels:
@@ -91,12 +77,16 @@ services:
       DB_HOST: postgres-init
       DB_USER: ${POSTGRES_USER}
       DB_PASS: ${POSTGRES_PASSWORD}
-      DB_NAME: ${POSTGRES_DB}
+      DB_NAME: orders_db
       DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-init:5432/orders_db"
     depends_on:
-      - postgres-init
+      postgres-init:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=web"
       - "traefik.http.routers.order.rule=PathPrefix(`/api/orders`)"
       - "traefik.http.middlewares.order-stripprefix.stripprefix.prefixes=/api/orders"
       - "traefik.http.routers.order.middlewares=order-stripprefix"
@@ -104,8 +94,7 @@ services:
       - "traefik.http.services.order.loadbalancer.server.port=5002"
     networks:
       - web
-      - postgres_data
-      - redis_data
+      - backend
 
 
 
@@ -115,12 +104,14 @@ services:
       DB_HOST: postgres-init
       DB_USER: ${POSTGRES_USER}
       DB_PASS: ${POSTGRES_PASSWORD}
-      DB_NAME: ${POSTGRES_DB}
+      DB_NAME: products_db
       DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-init:5432/products_db"
     depends_on:
-      - postgres-init
+      postgres-init:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=web"
       - "traefik.http.routers.product.rule=PathPrefix(`/api/products`)"
       - "traefik.http.middlewares.product-stripprefix.stripprefix.prefixes=/api/products"
       - "traefik.http.routers.product.middlewares=product-stripprefix"
@@ -128,8 +119,7 @@ services:
       - "traefik.http.services.product.loadbalancer.server.port=5001"
     networks:
       - web
-      - postgres_data
-
+      - backend
 
 
   user-service:
@@ -138,12 +128,14 @@ services:
       DB_HOST: postgres-init
       DB_USER: ${POSTGRES_USER}
       DB_PASS: ${POSTGRES_PASSWORD}
-      DB_NAME: ${POSTGRES_DB}
+      DB_NAME: users_db
       DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-init:5432/users_db"
     depends_on:
-      - postgres-init
+      postgres-init:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=web"
       - "traefik.http.routers.user.rule=PathPrefix(`/api/users`)"
       - "traefik.http.middlewares.user-stripprefix.stripprefix.prefixes=/api/users"
       - "traefik.http.routers.user.middlewares=user-stripprefix"
@@ -151,7 +143,7 @@ services:
       - "traefik.http.services.user.loadbalancer.server.port=5000"
     networks:
       - web
-      - postgres_data
+      - backend
 
 
 volumes:
@@ -163,12 +155,9 @@ networks:
   web:
     name: web
     driver: bridge
-  postgres_data:
-    name: postgres_data
-    driver: bridge
-    internal: true
-  redis_data:
-    name: redis_data
+
+  backend:
+    name: backend
     driver: bridge
     internal: true
 
